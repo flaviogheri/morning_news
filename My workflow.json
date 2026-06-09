@@ -1,0 +1,393 @@
+{
+  "name": "My workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "url": "https://api.quantamagazine.org/feed/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [-576, -112],
+      "id": "3913fdcc-040a-4e50-aa29-e48f656161a9",
+      "name": "Quanta Articles",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "url": "https://www.ilpost.it/mondo/feed/",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [-576, 80],
+      "id": "fbbe7c09-d109-4da3-bc7d-194c08c9b4a6",
+      "name": "ilPost - Mondo",
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "triggerAtHour": 7 }]
+        }
+      },
+      "id": "54a6267b-af78-4d11-b6a7-b8a0a7e9892c",
+      "name": "Daily at 7am",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [-800, -16]
+    },
+    {
+      "parameters": { "numberInputs": 3 },
+      "id": "941d3c1c-42df-4234-a7e7-56f471338504",
+      "name": "Combine All Feeds",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [-352, 16]
+    },
+    {
+      "parameters": {
+        "url": "https://www.ilpost.it/italia/feed/",
+        "options": {}
+      },
+      "id": "3797d004-65fa-4a5e-b5df-13d6edecf424",
+      "name": "ilPost - Italia",
+      "type": "n8n-nodes-base.rssFeedRead",
+      "typeVersion": 1.2,
+      "position": [-576, 272],
+      "executeOnce": true
+    },
+    {
+      "parameters": {
+        "compare": "selectedFields",
+        "fieldsToCompare": "link",
+        "options": {}
+      },
+      "id": "2181c306-d4e5-433a-9d8e-6907d926d2ea",
+      "name": "Remove Duplicates",
+      "type": "n8n-nodes-base.removeDuplicates",
+      "typeVersion": 1.1,
+      "position": [-128, 32]
+    },
+    {
+      "parameters": {
+        "url": "={{ $json.link }}",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "htmlContent"
+            }
+          }
+        }
+      },
+      "id": "0d996370-4b06-4292-b236-87a435ea05da",
+      "name": "Fetch Article Content",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.4,
+      "position": [96, 32]
+    },
+    {
+      "parameters": {
+        "operation": "extractHtmlContent",
+        "dataPropertyName": "htmlContent",
+        "extractionValues": {
+          "values": [
+            {
+              "key": "rawText",
+              "cssSelector": "article, .article-content, .post-content, main",
+              "skipSelectors": "nav, header, footer, .comments, .related-posts"
+            }
+          ]
+        },
+        "options": { "trimValues": true, "cleanUpText": true }
+      },
+      "id": "7fe36b52-6957-479b-aa3b-bcad4450739f",
+      "name": "Extract Article Text",
+      "type": "n8n-nodes-base.html",
+      "typeVersion": 1.2,
+      "position": [320, 32]
+    },
+    {
+      "parameters": {
+        "jsCode": "const results = [];\n\nfor (const item of $input.all()) {\n  const source = (item.json.rawText && item.json.rawText.length > 200)\n    ? item.json.rawText\n    : (item.json.htmlContent || '');\n\n  let articleText = source\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/https?:\\/\\/\\S+/g, '')\n    .replace(/&amp;/gi, '&').replace(/&lt;/gi, '<').replace(/&gt;/gi, '>').replace(/&[a-z#0-9]+;/gi, ' ')\n    .replace(/[\\x00-\\x08\\x0B\\x0C\\x0E-\\x1F\\x7F]/g, '')\n    .replace(/\\S{26,}/g, ' ')\n    .replace(/[ \\t]+/g, ' ')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n\n  results.push({ json: {\n    title: item.json.title || '',\n    link: item.json.link || '',\n    pubDate: item.json.pubDate || '',\n    articleText\n  }});\n}\n\nreturn results;"
+      },
+      "id": "e3285300-e1d2-42e3-88f7-fdf5e1a345ec",
+      "name": "Clean Article Text",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [544, 32]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=Evaluate this article for topic relevance and quality:\\n\\nTitle: {{ $json.title }}\\nContent: {{ $json.articleText }}\\n\\nKEEP articles about: science, technology, robotics, economics, business, philosophy, culture, international affairs, well-written insight-driven analysis (\\\"why X\\\" explainers, mechanism-and-meaning journalism). The article must itself contain the substance — explanation, data, argument, or analysis — not merely reference it.\\n\\nDROP articles about: Trump, AI taking jobs, celebrity gossip, crime, war, disaster, sports (exception: Jannik Sinner and the Italy national team), corruption, court cases, climate-change framing, refugees, entertainment.\\n\\nAlso DROP immediately, regardless of topic: podcast/video/newsletter announcements or season previews, episode lineups, \\\"coming soon\\\" pieces, promotional roundups, listicles of upcoming content, articles whose main purpose is to direct readers elsewhere (subscribe, listen, watch). If the article is a wrapper around other content rather than substantive content itself, drop it.\\n\\nQuality bar — keep only if ALL of the following are true:\\n1. The article itself explains or analyzes something (not just names topics)\\n2. A reader learns something concrete after reading it\\n3. It goes beyond surface-level description — it has depth, mechanism, or original argument\\n\\nReturn JSON with: keep (true if good topic AND passes quality bar, false otherwise), score (0-10 overall interest), reason (one sentence explaining the decision)",
+        "hasOutputParser": true,
+        "batching": {}
+      },
+      "id": "c28e2afe-223a-483e-b2ee-56fdabc3fbdf",
+      "name": "Filter & Score",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [768, -80]
+    },
+    {
+      "parameters": {
+        "jsonSchemaExample": "{ \"keep\": true, \"score\": 8, \"reason\": \"Insightful analysis of new research\" }",
+        "autoFix": true
+      },
+      "id": "612b4ac8-a055-422e-a17e-f8d05b24a73e",
+      "name": "JSON Parser",
+      "type": "@n8n/n8n-nodes-langchain.outputParserStructured",
+      "typeVersion": 1.3,
+      "position": [848, 144]
+    },
+    {
+      "parameters": {
+        "model": "llama3.1:8b",
+        "options": {}
+      },
+      "id": "b85e2e40-340b-4f2e-bae6-c2442543b7f7",
+      "name": "Ollama (Filter)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOllama",
+      "typeVersion": 1,
+      "position": [848, 352]
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "id": "bb112233-4455-6677-8899-aabbccddeeff",
+      "name": "Merge Article + Scores",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [992, 32]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Both article data and LLM scores are now present on the merged item.\n// Explicitly pick only what we need going forward.\nreturn $input.all().map(item => ({\n  json: {\n    title:       item.json.title       || '',\n    link:        item.json.link        || '',\n    pubDate:     item.json.pubDate     || '',\n    articleText: item.json.articleText || '',\n    keep:        item.json.output?.keep  ?? false,\n    score:       item.json.output?.score ?? 0,\n    reason:      item.json.output?.reason ?? ''\n  }\n}));"
+      },
+      "id": "aa001122-bbcc-ddee-ff00-112233445566",
+      "name": "Flatten Output",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1216, 32]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.keep }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "true" },
+              "id": "be4ddf3f-8717-488e-9933-7a279b08b789"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "85a446ce-6919-4958-9b11-96bf3c02140d",
+      "name": "Keep High Quality",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [1440, 32]
+    },
+    {
+      "parameters": {
+        "sortFieldsUi": {
+          "sortField": [{ "fieldName": "score", "order": "descending" }]
+        },
+        "options": {}
+      },
+      "id": "46103460-c3ea-4a49-87db-535e47131f74",
+      "name": "Sort by Score",
+      "type": "n8n-nodes-base.sort",
+      "typeVersion": 1,
+      "position": [1664, 32]
+    },
+    {
+      "parameters": { "maxItems": 4 },
+      "id": "a64a444f-dc5c-4eba-9229-3edb4d04a7e5",
+      "name": "Top 4 Articles",
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [1888, 32]
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are adapting a single article for audio delivery. Your job is NOT to summarize — preserve all the detail, examples, data, quotes, and reasoning from the original. Simply convert written text into natural spoken language.\\n\\n- Keep all key facts, insights, arguments, and examples from the original\\n- Convert written constructions to natural spoken language (avoid passive voice, jargon, parenthetical asides)\\n- Remove anything web-specific: figure captions, footnote numbers, \\\"click here\\\", share buttons, subscription prompts\\n- Write as if a knowledgeable friend is reading it aloud — warm, clear, no robotic phrasing\\n- Do NOT add an introduction, conclusion, or transition sentence\\n\\nArticle: {{ $json.title }}\\n\\nWhy selected: {{ $json.reason }}\\n\\n{{ $json.articleText }}\\n\\nReturn only the spoken script for this article, ready to be read aloud.",
+        "batching": {}
+      },
+      "id": "a821863f-c93d-4654-bd64-4943ba8c4784",
+      "name": "Generate Audio Script",
+      "type": "@n8n/n8n-nodes-langchain.chainLlm",
+      "typeVersion": 1.9,
+      "position": [2112, 32]
+    },
+    {
+      "parameters": {
+        "model": "llama-3.3-70b-versatile",
+        "options": { "temperature": 0.4 }
+      },
+      "id": "cc112233-4455-6677-8899-aabbccddeeff",
+      "name": "Groq (Script)",
+      "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
+      "typeVersion": 1,
+      "position": [2192, 256],
+      "credentials": {
+        "groqApi": {
+          "id": "REPLACE_WITH_YOUR_GROQ_CREDENTIAL_ID",
+          "name": "Groq API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const parts = $input.all().map(item => item.json.text || '');\nreturn [{ json: { text: parts.join('\\n\\n') } }];"
+      },
+      "id": "dd112233-4455-6677-8899-aabbccddeeff",
+      "name": "Combine Scripts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2336, 32]
+    },
+    {
+      "parameters": {
+        "resource": "audio",
+        "model": "tts-1-hd",
+        "input": "={{ $json.text }}",
+        "voice": "nova",
+        "options": {
+          "response_format": "mp3",
+          "speed": 1,
+          "binaryPropertyOutput": "audio"
+        }
+      },
+      "id": "0f26fecb-be08-4be9-b8df-715eda610d64",
+      "name": "Text to Speech",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2.3,
+      "position": [2560, 32],
+      "credentials": {
+        "openAiApi": {
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "4c44d07d-dce6-4e86-aa53-d6d025ab850a",
+      "name": "Manual Test Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [-800, 368]
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Daily at 7am": {
+      "main": [[
+        { "node": "Quanta Articles", "type": "main", "index": 0 },
+        { "node": "ilPost - Mondo", "type": "main", "index": 0 },
+        { "node": "ilPost - Italia", "type": "main", "index": 0 }
+      ]]
+    },
+    "Manual Test Trigger": {
+      "main": [[
+        { "node": "Quanta Articles", "type": "main", "index": 0 },
+        { "node": "ilPost - Mondo", "type": "main", "index": 0 },
+        { "node": "ilPost - Italia", "type": "main", "index": 0 }
+      ]]
+    },
+    "Quanta Articles": {
+      "main": [[{ "node": "Combine All Feeds", "type": "main", "index": 0 }]]
+    },
+    "ilPost - Mondo": {
+      "main": [[{ "node": "Combine All Feeds", "type": "main", "index": 1 }]]
+    },
+    "ilPost - Italia": {
+      "main": [[{ "node": "Combine All Feeds", "type": "main", "index": 2 }]]
+    },
+    "Combine All Feeds": {
+      "main": [[{ "node": "Remove Duplicates", "type": "main", "index": 0 }]]
+    },
+    "Remove Duplicates": {
+      "main": [[{ "node": "Fetch Article Content", "type": "main", "index": 0 }]]
+    },
+    "Fetch Article Content": {
+      "main": [[{ "node": "Extract Article Text", "type": "main", "index": 0 }]]
+    },
+    "Extract Article Text": {
+      "main": [[{ "node": "Clean Article Text", "type": "main", "index": 0 }]]
+    },
+    "Clean Article Text": {
+      "main": [[
+        { "node": "Filter & Score", "type": "main", "index": 0 },
+        { "node": "Merge Article + Scores", "type": "main", "index": 1 }
+      ]]
+    },
+    "Filter & Score": {
+      "main": [[{ "node": "Merge Article + Scores", "type": "main", "index": 0 }]]
+    },
+    "JSON Parser": {
+      "ai_outputParser": [[{ "node": "Filter & Score", "type": "ai_outputParser", "index": 0 }]]
+    },
+    "Ollama (Filter)": {
+      "ai_languageModel": [[
+        { "node": "Filter & Score", "type": "ai_languageModel", "index": 0 },
+        { "node": "JSON Parser", "type": "ai_languageModel", "index": 0 }
+      ]]
+    },
+    "Merge Article + Scores": {
+      "main": [[{ "node": "Flatten Output", "type": "main", "index": 0 }]]
+    },
+    "Flatten Output": {
+      "main": [[{ "node": "Keep High Quality", "type": "main", "index": 0 }]]
+    },
+    "Keep High Quality": {
+      "main": [[{ "node": "Sort by Score", "type": "main", "index": 0 }]]
+    },
+    "Sort by Score": {
+      "main": [[{ "node": "Top 4 Articles", "type": "main", "index": 0 }]]
+    },
+    "Top 4 Articles": {
+      "main": [[{ "node": "Generate Audio Script", "type": "main", "index": 0 }]]
+    },
+    "Generate Audio Script": {
+      "main": [[{ "node": "Combine Scripts", "type": "main", "index": 0 }]]
+    },
+    "Groq (Script)": {
+      "ai_languageModel": [[
+        { "node": "Generate Audio Script", "type": "ai_languageModel", "index": 0 }
+      ]]
+    },
+    "Combine Scripts": {
+      "main": [[{ "node": "Text to Speech", "type": "main", "index": 0 }]]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "3412c97d-99b3-4d90-8432-d8b74497f52d",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": ""
+  },
+  "nodeGroups": [],
+  "id": "0ys7lxyTzJu368Ee",
+  "tags": []
+}
